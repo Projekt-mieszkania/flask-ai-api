@@ -14,7 +14,9 @@ def generate():
         soup = BeautifulSoup(response.text, 'html.parser')
 
         # Название товара
-        title = soup.select_one('div.product-name h1').get_text(strip=True)
+        title_tag = soup.select_one('div.product-name h1')
+        title = title_tag.get_text(strip=True) if title_tag else "Без названия"
+
 
         # Описание
         desc_block = soup.select_one('div.product-description')
