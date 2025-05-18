@@ -1,6 +1,6 @@
- services:
+services:
   - type: web
-    name: flask-noai-enhanced
+    name: flask-huggingface
     env: python
     plan: free
     buildCommand: "pip install -r requirements.txt"
