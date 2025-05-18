@@ -16,7 +16,7 @@ def generate():
         response = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        # Название товара
+        # Название
         title = "Bez nazwy"
         for selector in ['h1', 'h1.product-title', 'h1[itemprop=name]', 'meta[property="og:title"]']:
             tag = soup.select_one(selector)
@@ -24,7 +24,7 @@ def generate():
                 title = tag.get_text(strip=True) if tag.name != 'meta' else tag.get("content", "").strip()
                 break
 
-        # Попытка найти описание
+        # Описание
         description = ""
         for selector in ['div.description', 'div.product-description', 'div[itemprop=description]', 'meta[name="description"]']:
             tag = soup.select_one(selector)
@@ -32,18 +32,47 @@ def generate():
                 description = tag.get_text(strip=True) if tag.name != 'meta' else tag.get("content", "").strip()
                 break
 
-        # Если описания нет — подставим шаблон
         if not description and title != "Bez nazwy":
             description = f"{title} to nowoczesny i funkcjonalny produkt idealny do każdego wnętrza. Charakteryzuje się wysoką jakością wykonania i atrakcyjnym designem."
 
-        # Картинки
+        # Изображения — исключаем баннеры и иконки
         images = []
         for img in soup.find_all("img"):
             src = img.get("src")
-            if src and src.startswith("http"):
+            if src and src.startswith("http") and "CatImg" not in src and "icon" not in src:
                 images.append(src)
-            if len(images) >= 3:
+            if len(images) >= 5:
                 break
+
+        # Атрибуты — парсим списки или таблицы, если есть
+        attributes = []
+        for ul in soup.select("ul.product-attributes, ul.attributes, ul.characteristics"):
+            for li in ul.select("li"):
+                parts = li.get_text(strip=True).split(":")
+                if len(parts) >= 2:
+                    name = parts[0].strip()
+                    value = parts[1].strip()
+                    attributes.append({
+                        "name": name,
+                        "options": [value],
+                        "visible": True,
+                        "variation": False
+                    })
+
+        # Альтернатива: таблица
+        table = soup.select_one("table")
+        if table:
+            for row in table.select("tr"):
+                cols = row.select("td")
+                if len(cols) >= 2:
+                    name = cols[0].get_text(strip=True)
+                    value = cols[1].get_text(strip=True)
+                    attributes.append({
+                        "name": name,
+                        "options": [value],
+                        "visible": True,
+                        "variation": False
+                    })
 
         return jsonify({
             "title": title,
@@ -54,7 +83,7 @@ def generate():
                 "keywords": [word.lower() for word in title.split() if len(word) > 3]
             },
             "images": images,
-            "attributes": []
+            "attributes": attributes
         })
 
     except Exception as e:
@@ -63,6 +92,3 @@ def generate():
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
 
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
