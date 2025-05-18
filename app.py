@@ -8,8 +8,7 @@ HUGGINGFACE_API_URL = "https://api-inference.huggingface.co/models/tiiuae/falcon
 
 def rewrite_description(text):
     payload = {
-        "inputs": f"Przepisz ten opis produktu w sposób unikalny, naturalny i marketingowy:
-{text}"
+        "inputs": f"Przepisz ten opis produktu w sposób unikalny, naturalny i marketingowy:\n{text}"
     }
 
     try:
@@ -98,3 +97,4 @@ def generate():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
