@@ -4,14 +4,14 @@ from bs4 import BeautifulSoup
 
 app = Flask(__name__)
 
-# Конфигурация WooCommerce
+# WooCommerce config
 WC_URL = "https://projekt-mieszkania.pl"
 WC_KEY = "ck_f5c91a1d42a5dc898fe3fea084d464a29b9a2466"
 WC_SECRET = "cs_2d80076cdfa0e571855e1965115387ec5946495b"
 
 HUGGINGFACE_API_URL = "https://api-inference.huggingface.co/models/tiiuae/falcon-7b-instruct"
 
-# Получение всех глобальных атрибутов из WooCommerce
+# Получение глобальных атрибутов WooCommerce
 def get_wc_attributes():
     try:
         response = requests.get(
@@ -21,9 +21,22 @@ def get_wc_attributes():
         )
         data = response.json()
         return {item["name"]: item["slug"] for item in data}
-    except Exception as e:
+    except Exception:
         return {}
 
+# Проверка, является ли строка "мусором"
+def is_garbage(text):
+    return (
+        "var" in text or
+        "=" in text or
+        ";" in text or
+        "{" in text or
+        "}" in text or
+        len(text) > 100 or
+        not any(c.isalnum() for c in text)
+    )
+
+# Уникализация описания
 def rewrite_description(text):
     payload = {
         "inputs": f"Przepisz ten opis produktu w sposób unikalny, naturalny i marketingowy:\n{text}"
@@ -36,7 +49,7 @@ def rewrite_description(text):
             return result[0]["generated_text"]
         else:
             return text
-    except Exception as e:
+    except Exception:
         return text
 
 @app.route("/generate", methods=["POST"])
@@ -68,7 +81,7 @@ def generate():
                 break
 
         if not description and title != "Bez nazwy":
-            description = f"{title} to nowoczesny i funkcjonalny produkt idealny do każdego wnętrza. Charakteryzuje się wysoką jakością wykonania i atrakcyjnym designem."
+            description = f"{title} to nowoczesny i funkcjonalny produkt idealny do każdego wnętrza."
 
         rewritten = rewrite_description(description)
 
@@ -92,7 +105,11 @@ def generate():
                 while i < len(lines) - 1:
                     name = lines[i].strip().strip(":")
                     value = lines[i + 1].strip()
-                    if name and value and len(name) < 60 and len(value) < 100:
+                    if (
+                        name and value and
+                        not is_garbage(name) and
+                        not is_garbage(value)
+                    ):
                         attributes.append({
                             "name": name,
                             "slug": wc_slugs.get(name, ""),
