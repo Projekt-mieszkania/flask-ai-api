@@ -4,6 +4,24 @@ from bs4 import BeautifulSoup
 
 app = Flask(__name__)
 
+HUGGINGFACE_API_URL = "https://api-inference.huggingface.co/models/tiiuae/falcon-7b-instruct"
+
+def rewrite_description(text):
+    payload = {
+        "inputs": f"Przepisz ten opis produktu w sposób unikalny, naturalny i marketingowy:
+{text}"
+    }
+
+    try:
+        response = requests.post(HUGGINGFACE_API_URL, json=payload, timeout=60)
+        result = response.json()
+        if isinstance(result, list) and "generated_text" in result[0]:
+            return result[0]["generated_text"]
+        else:
+            return text
+    except Exception as e:
+        return text
+
 @app.route("/generate", methods=["POST"])
 def generate():
     data = request.get_json()
@@ -35,7 +53,10 @@ def generate():
         if not description and title != "Bez nazwy":
             description = f"{title} to nowoczesny i funkcjonalny produkt idealny do każdego wnętrza. Charakteryzuje się wysoką jakością wykonania i atrakcyjnym designem."
 
-        # Изображения — исключаем баннеры и иконки
+        # Переписываем с Hugging Face
+        rewritten = rewrite_description(description)
+
+        # Изображения
         images = []
         for img in soup.find_all("img"):
             src = img.get("src")
@@ -44,22 +65,8 @@ def generate():
             if len(images) >= 5:
                 break
 
-        # Атрибуты — парсим списки или таблицы, если есть
+        # Атрибуты
         attributes = []
-        for ul in soup.select("ul.product-attributes, ul.attributes, ul.characteristics"):
-            for li in ul.select("li"):
-                parts = li.get_text(strip=True).split(":")
-                if len(parts) >= 2:
-                    name = parts[0].strip()
-                    value = parts[1].strip()
-                    attributes.append({
-                        "name": name,
-                        "options": [value],
-                        "visible": True,
-                        "variation": False
-                    })
-
-        # Альтернатива: таблица
         table = soup.select_one("table")
         if table:
             for row in table.select("tr"):
@@ -76,10 +83,10 @@ def generate():
 
         return jsonify({
             "title": title,
-            "description": description,
+            "description": rewritten,
             "seo": {
                 "meta_title": title,
-                "meta_description": description[:160],
+                "meta_description": rewritten[:160],
                 "keywords": [word.lower() for word in title.split() if len(word) > 3]
             },
             "images": images,
@@ -91,4 +98,3 @@ def generate():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
-
