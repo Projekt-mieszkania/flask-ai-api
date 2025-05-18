@@ -1,11 +1,8 @@
 from flask import Flask, request, jsonify
 import requests
 from bs4 import BeautifulSoup
-import os
-import openai
 
 app = Flask(__name__)
-openai.api_key = os.environ.get("OPENAI_API_KEY")
 
 @app.route("/generate", methods=["POST"])
 def generate():
@@ -19,7 +16,7 @@ def generate():
         response = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        # Поиск заголовка
+        # Название товара
         title = "Bez nazwy"
         for selector in ['h1', 'h1.product-title', 'h1[itemprop=name]', 'meta[property="og:title"]']:
             tag = soup.select_one(selector)
@@ -27,7 +24,7 @@ def generate():
                 title = tag.get_text(strip=True) if tag.name != 'meta' else tag.get("content", "").strip()
                 break
 
-        # Поиск описания
+        # Попытка найти описание
         description = ""
         for selector in ['div.description', 'div.product-description', 'div[itemprop=description]', 'meta[name="description"]']:
             tag = soup.select_one(selector)
@@ -35,7 +32,11 @@ def generate():
                 description = tag.get_text(strip=True) if tag.name != 'meta' else tag.get("content", "").strip()
                 break
 
-        # Изображения
+        # Если описания нет — подставим шаблон
+        if not description and title != "Bez nazwy":
+            description = f"{title} to nowoczesny i funkcjonalny produkt idealny do każdego wnętrza. Charakteryzuje się wysoką jakością wykonania i atrakcyjnym designem."
+
+        # Картинки
         images = []
         for img in soup.find_all("img"):
             src = img.get("src")
@@ -44,38 +45,13 @@ def generate():
             if len(images) >= 3:
                 break
 
-        # Генерация SEO и описания
-        prompt = f"""
-Produkt: {title}
-Opis strony: {description}
-
-Wygeneruj zoptymalizowany opis produktu po polsku, metatytuł, metadescription i słowa kluczowe dla SEO.
-Format odpowiedzi JSON:
-{{
-  "description": "...",
-  "meta_title": "...",
-  "meta_description": "...",
-  "keywords": ["...", "..."]
-}}
-"""
-
-        completion = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7
-        )
-
-        content = completion.choices[0].message['content']
-        import json
-        seo_data = json.loads(content)
-
         return jsonify({
             "title": title,
-            "description": seo_data["description"],
+            "description": description,
             "seo": {
-                "meta_title": seo_data["meta_title"],
-                "meta_description": seo_data["meta_description"],
-                "keywords": seo_data["keywords"]
+                "meta_title": title,
+                "meta_description": description[:160],
+                "keywords": [word.lower() for word in title.split() if len(word) > 3]
             },
             "images": images,
             "attributes": []
@@ -83,6 +59,10 @@ Format odpowiedzi JSON:
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
