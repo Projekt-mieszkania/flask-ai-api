@@ -10,7 +10,11 @@ def generate():
     url = data.get("url")
 
     try:
-        response = requests.get(url, timeout=10)
+        headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122 Safari/537.36"
+}
+        response = requests.get(url, headers=headers, timeout=10)
+
         soup = BeautifulSoup(response.text, 'html.parser')
 
         # Название
