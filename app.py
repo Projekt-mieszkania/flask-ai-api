@@ -4,7 +4,25 @@ from bs4 import BeautifulSoup
 
 app = Flask(__name__)
 
+# Конфигурация WooCommerce
+WC_URL = "https://projekt-mieszkania.pl"
+WC_KEY = "ck_f5c91a1d42a5dc898fe3fea084d464a29b9a2466"
+WC_SECRET = "cs_2d80076cdfa0e571855e1965115387ec5946495b"
+
 HUGGINGFACE_API_URL = "https://api-inference.huggingface.co/models/tiiuae/falcon-7b-instruct"
+
+# Получение всех глобальных атрибутов из WooCommerce
+def get_wc_attributes():
+    try:
+        response = requests.get(
+            f"{WC_URL}/wp-json/wc/v3/products/attributes",
+            auth=(WC_KEY, WC_SECRET),
+            timeout=10
+        )
+        data = response.json()
+        return {item["name"]: item["slug"] for item in data}
+    except Exception as e:
+        return {}
 
 def rewrite_description(text):
     payload = {
@@ -27,11 +45,11 @@ def generate():
     url = data.get("url")
 
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0"
-        }
+        headers = {"User-Agent": "Mozilla/5.0"}
         response = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(response.text, 'html.parser')
+
+        wc_slugs = get_wc_attributes()
 
         # Название
         title = "Bez nazwy"
@@ -52,7 +70,6 @@ def generate():
         if not description and title != "Bez nazwy":
             description = f"{title} to nowoczesny i funkcjonalny produkt idealny do każdego wnętrza. Charakteryzuje się wysoką jakością wykonania i atrakcyjnym designem."
 
-        # Переписываем с Hugging Face
         rewritten = rewrite_description(description)
 
         # Изображения
@@ -66,19 +83,26 @@ def generate():
 
         # Атрибуты
         attributes = []
-        table = soup.select_one("table")
-        if table:
-            for row in table.select("tr"):
-                cols = row.select("td")
-                if len(cols) >= 2:
-                    name = cols[0].get_text(strip=True)
-                    value = cols[1].get_text(strip=True)
-                    attributes.append({
-                        "name": name,
-                        "options": [value],
-                        "visible": True,
-                        "variation": False
-                    })
+        param_header = soup.find(lambda tag: tag.name in ['h2', 'div'] and "Parametry produktu" in tag.get_text())
+        if param_header:
+            param_block = param_header.find_next()
+            if param_block:
+                lines = param_block.get_text(separator="\n").split("\n")
+                i = 0
+                while i < len(lines) - 1:
+                    name = lines[i].strip().strip(":")
+                    value = lines[i + 1].strip()
+                    if name and value and len(name) < 60 and len(value) < 100:
+                        attributes.append({
+                            "name": name,
+                            "slug": wc_slugs.get(name, ""),
+                            "options": [value],
+                            "visible": True,
+                            "variation": False
+                        })
+                        i += 2
+                    else:
+                        i += 1
 
         return jsonify({
             "title": title,
@@ -97,4 +121,3 @@ def generate():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
-
