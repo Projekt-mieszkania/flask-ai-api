@@ -1,9 +1,19 @@
 from flask import Flask, request, jsonify
 import requests
 from bs4 import BeautifulSoup
+from woocommerce import API
 
 app = Flask(__name__)
 
+# Подключение к WooCommerce
+wcapi = API(
+    url="https://projekt-mieszkania.pl",
+    consumer_key="ck_f5c91a1d42a5dc898fe3fea084d464a29b9a2466",       # ← замените на ваш
+    consumer_secret="cs_2d80076cdfa0e571855e1965115387ec5946495b",  # ← замените на ваш
+    version="wc/v3"
+)
+
+# Проверка "мусорного" текста
 def is_garbage(text):
     return (
         "var" in text or "=" in text or ";" in text or
@@ -11,9 +21,26 @@ def is_garbage(text):
         not any(c.isalnum() for c in text)
     )
 
+# Очистка текста
 def clean_text(text):
     return text.replace("\n", " ").replace("\r", "").strip()
 
+# Проверка и добавление атрибута в WooCommerce
+def ensure_attribute_exists(name, slug):
+    try:
+        existing = wcapi.get("products/attributes").json()
+        existing_names = [attr["name"].lower() for attr in existing]
+        if name.lower() not in existing_names:
+            wcapi.post("products/attributes", {
+                "name": name,
+                "slug": slug,
+                "type": "select",
+                "has_archives": True
+            })
+    except Exception as e:
+        print(f"⚠️ Ошибка добавления атрибута '{name}': {e}")
+
+# Обработка атрибутов
 def clean_and_split_attributes(raw_attributes):
     seen = set()
     final_attrs = []
@@ -22,6 +49,7 @@ def clean_and_split_attributes(raw_attributes):
     for attr in raw_attributes:
         name = clean_text(attr["name"])
         value = clean_text(attr["options"][0])
+        slug = name.lower().replace(" ", "-")
 
         if any(bad in value.lower() for bad in blacklist):
             continue
@@ -35,6 +63,7 @@ def clean_and_split_attributes(raw_attributes):
                 pair = (key.lower(), val.lower())
                 if pair not in seen and not is_garbage(key) and not is_garbage(val):
                     seen.add(pair)
+                    ensure_attribute_exists(key, key.lower().replace(" ", "-"))
                     final_attrs.append({
                         "name": key,
                         "options": [val],
@@ -48,6 +77,7 @@ def clean_and_split_attributes(raw_attributes):
             pair = (key.lower(), val.lower())
             if pair not in seen and not is_garbage(key) and not is_garbage(val):
                 seen.add(pair)
+                ensure_attribute_exists(key, key.lower().replace(" ", "-"))
                 final_attrs.append({
                     "name": key,
                     "options": [val],
