@@ -15,7 +15,7 @@ def is_garbage(text):
     )
 
 def clean_text(text):
-    return text.replace("\n", "
+    return text.replace("\\n", "\n").replace("\\r", "").strip()
 ").replace("\r", "").strip()
 
 def normalize_name(name):
