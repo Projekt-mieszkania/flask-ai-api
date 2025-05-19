@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 import requests
 from bs4 import BeautifulSoup
+import re
 
 app = Flask(__name__)
 
@@ -15,7 +16,6 @@ def clean_text(text):
     return text.replace("\n", " ").replace("\r", "").strip()
 
 def clean_and_split_attributes(raw_attributes):
-    import re
     seen = set()
     final_attrs = []
     blacklist = [
@@ -24,33 +24,46 @@ def clean_and_split_attributes(raw_attributes):
     ]
 
     for attr in raw_attributes:
-        name = attr.get("name", "").strip()
-        value = attr.get("options", [""])[0].strip()
+        name = clean_text(attr.get("name", ""))
+        value = clean_text(attr.get("options", [""])[0])
 
-        if len(value) > 200 or any(bad in value.lower() for bad in blacklist):
-            continue
-        if any(bad in name.lower() for bad in blacklist):
+        if any(bad in name.lower() for bad in blacklist) or any(bad in value.lower() for bad in blacklist):
             continue
 
-        # Разбиваем подстроки по переносам или пробелам
-        lines = value.splitlines() + value.split(" ")
-        for line in lines:
-            if ":" in line:
-                key, val = map(str.strip, line.split(":", 1))
-                key = key.capitalize()
-                val = val.strip()
-                pair = (key.lower(), val.lower())
-                if pair not in seen and val:
-                    seen.add(pair)
-                    final_attrs.append({
-                        "name": key,
-                        "options": [val],
-                        "slug": "",
-                        "visible": True,
-                        "variation": False
-                    })
+        # Попытка вытащить размеры и параметры из текста
+        matches = re.findall(r"(szerokość|wysokość|głębokość)[:\s]*([\d,\.]+ ?cm?)", value.lower())
+        for key, val in matches:
+            key = key.capitalize()
+            pair = (key.lower(), val.lower())
+            if pair not in seen:
+                seen.add(pair)
+                final_attrs.append({
+                    "name": key,
+                    "options": [val],
+                    "slug": "",
+                    "visible": True,
+                    "variation": False
+                })
 
-        if ":" not in value and len(value) < 100:
+        # Обработка ключ: значение
+        if ":" in value:
+            for line in value.splitlines():
+                if ":" in line:
+                    key, val = map(str.strip, line.split(":", 1))
+                    key = key.capitalize()
+                    val = val.strip()
+                    pair = (key.lower(), val.lower())
+                    if pair not in seen and not is_garbage(key) and not is_garbage(val):
+                        seen.add(pair)
+                        final_attrs.append({
+                            "name": key,
+                            "options": [val],
+                            "slug": "",
+                            "visible": True,
+                            "variation": False
+                        })
+        # Если просто пара "имя — значение"
+        elif len(value) < 100 and not is_garbage(name) and not is_garbage(value):
             key = name.capitalize()
             val = value
             pair = (key.lower(), val.lower())
