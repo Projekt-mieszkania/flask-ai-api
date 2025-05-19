@@ -43,6 +43,70 @@ def rewrite_description(text):
     except Exception:
         return text
 
+def extract_attributes(soup, wc_slugs):
+    attributes = []
+
+    # 1. Таблицы
+    for table in soup.find_all("table"):
+        for row in table.find_all("tr"):
+            cols = row.find_all(["td", "th"])
+            if len(cols) >= 2:
+                name = cols[0].get_text(strip=True).strip(":")
+                value = cols[1].get_text(strip=True)
+                if name and value and not is_garbage(name) and not is_garbage(value):
+                    attributes.append({
+                        "name": name,
+                        "slug": wc_slugs.get(name, ""),
+                        "options": [value],
+                        "visible": True,
+                        "variation": False
+                    })
+
+    # 2. Списки ul > li с двоеточием
+    for li in soup.find_all("li"):
+        if ":" in li.get_text():
+            parts = li.get_text().split(":", 1)
+            name, value = parts[0].strip(), parts[1].strip()
+            if name and value and not is_garbage(name) and not is_garbage(value):
+                attributes.append({
+                    "name": name,
+                    "slug": wc_slugs.get(name, ""),
+                    "options": [value],
+                    "visible": True,
+                    "variation": False
+                })
+
+    # 3. div/p/span с двоеточием
+    for tag in soup.find_all(["div", "p", "span"]):
+        if ":" in tag.get_text():
+            parts = tag.get_text().split(":", 1)
+            name, value = parts[0].strip(), parts[1].strip()
+            if name and value and not is_garbage(name) and not is_garbage(value):
+                attributes.append({
+                    "name": name,
+                    "slug": wc_slugs.get(name, ""),
+                    "options": [value],
+                    "visible": True,
+                    "variation": False
+                })
+
+    # 4. dt/dd из <dl>
+    for dt in soup.find_all("dt"):
+        dd = dt.find_next_sibling("dd")
+        if dd:
+            name = dt.get_text(strip=True)
+            value = dd.get_text(strip=True)
+            if name and value and not is_garbage(name) and not is_garbage(value):
+                attributes.append({
+                    "name": name,
+                    "slug": wc_slugs.get(name, ""),
+                    "options": [value],
+                    "visible": True,
+                    "variation": False
+                })
+
+    return attributes
+
 @app.route("/generate", methods=["POST"])
 def generate():
     data = request.get_json()
@@ -81,25 +145,7 @@ def generate():
             if len(images) >= 5:
                 break
 
-        attributes = []
-        # Новый парсинг параметров из блока .product-params
-        param_container = soup.select_one("div.product-params")
-        if param_container:
-            items = param_container.select("div.product-params__item")
-            for item in items:
-                name_tag = item.select_one("div.product-params__key")
-                value_tag = item.select_one("div.product-params__value")
-                if name_tag and value_tag:
-                    name = name_tag.get_text(strip=True).strip(":")
-                    value = value_tag.get_text(strip=True)
-                    if not is_garbage(name) and not is_garbage(value):
-                        attributes.append({
-                            "name": name,
-                            "slug": wc_slugs.get(name, ""),
-                            "options": [value],
-                            "visible": True,
-                            "variation": False
-                        })
+        attributes = extract_attributes(soup, wc_slugs)
 
         return jsonify({
             "title": title,
@@ -118,3 +164,4 @@ def generate():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
