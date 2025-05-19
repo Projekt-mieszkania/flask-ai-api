@@ -15,8 +15,7 @@ def is_garbage(text):
     )
 
 def clean_text(text):
-    return text.replace("\\n", "\n").replace("\\r", "").strip()
-").replace("\r", "").strip()
+    return text.replace("\\n", " ").replace("\\r", "").strip()
 
 def normalize_name(name):
     return name.strip().capitalize()
@@ -47,8 +46,7 @@ def clean_and_split_attributes(raw_attributes):
         name = clean_text(attr["name"])
         value = clean_text(attr["options"][0])
 
-        if any(x in value for x in [":", "
-"]):
+        if any(x in value for x in [":", "\\n"]):
             sub_attrs = split_value_into_attributes(name, value)
             for sub in sub_attrs:
                 key = (sub["name"].lower(), sub["options"][0].lower())
@@ -97,7 +95,6 @@ def generate():
             if len(images) >= 5:
                 break
 
-        # Собираем атрибуты
         raw_attributes = []
         for tag in soup.find_all(["li", "div", "p", "span"]):
             text = tag.get_text(strip=True)
@@ -130,4 +127,3 @@ def generate():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
-
