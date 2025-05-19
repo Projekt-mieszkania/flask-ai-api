@@ -44,26 +44,30 @@ def ensure_attribute_exists(name, slug):
 def clean_and_split_attributes(raw_attributes):
     seen = set()
     final_attrs = []
-    blacklist = ['dodaj do koszyka', 'zapytaj o cenę', 'darmowa dostawa', 'facebook']
+    blacklist = ['dodaj do koszyka', 'zapytaj o cenę', 'zobacz produkt', 'darmowa dostawa']
 
     for attr in raw_attributes:
-        name = clean_text(attr["name"])
-        value = clean_text(attr["options"][0])
-        slug = name.lower().replace(" ", "-")
+        name = attr.get("name", "").strip()
+        value = attr.get("options", [""])[0].strip()
 
+        # Игнорируем мусор
         if any(bad in value.lower() for bad in blacklist):
             continue
 
+        # Разбиваем составные значения с двоеточием
         lines = value.splitlines()
+        if len(lines) == 1:
+            lines = [value]
+
         for line in lines:
             if ":" in line:
-                key, val = map(str.strip, line.split(":", 1))
-                key = key.capitalize()
+                key, val = line.split(":", 1)
+                key = key.strip().capitalize()
                 val = val.strip()
                 pair = (key.lower(), val.lower())
-                if pair not in seen and not is_garbage(key) and not is_garbage(val):
+
+                if pair not in seen and val:
                     seen.add(pair)
-                    ensure_attribute_exists(key, key.lower().replace(" ", "-"))
                     final_attrs.append({
                         "name": key,
                         "options": [val],
@@ -71,20 +75,21 @@ def clean_and_split_attributes(raw_attributes):
                         "visible": True,
                         "variation": False
                     })
-        if ":" not in value:
-            key = name.capitalize()
-            val = value
-            pair = (key.lower(), val.lower())
-            if pair not in seen and not is_garbage(key) and not is_garbage(val):
-                seen.add(pair)
-                ensure_attribute_exists(key, key.lower().replace(" ", "-"))
-                final_attrs.append({
-                    "name": key,
-                    "options": [val],
-                    "slug": "",
-                    "visible": True,
-                    "variation": False
-                })
+            else:
+                # Обрабатываем строку без ":" если она уникальна и не мусор
+                key = name.strip().capitalize()
+                val = line.strip()
+                pair = (key.lower(), val.lower())
+
+                if pair not in seen and val and all(b not in val.lower() for b in blacklist):
+                    seen.add(pair)
+                    final_attrs.append({
+                        "name": key,
+                        "options": [val],
+                        "slug": "",
+                        "visible": True,
+                        "variation": False
+                    })
 
     return final_attrs
 
