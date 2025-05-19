@@ -23,8 +23,7 @@ def clean_and_split_attributes(raw_attributes):
         value = attr["options"][0].strip()
 
         # Расщепляем составные значения с переносами строк
-        if "\n" in value or "\r" in value or "
-" in value:
+        if "\n" in value or "\r" in value or "\\n" in value:
             for line in value.splitlines():
                 if ":" in line:
                     sub_name, sub_value = line.split(":", 1)
