@@ -1,15 +1,10 @@
 from flask import Flask, request, jsonify
 import requests
 from bs4 import BeautifulSoup
-from transformers import pipeline
 
 app = Flask(__name__)
 
-# Используем более лёгкую модель
-rephraser = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
-
-import requests
-
+# Подключение к Hugging Face Space
 def rewrite_description(text):
     try:
         res = requests.post(
@@ -17,10 +12,9 @@ def rewrite_description(text):
             json={"data": [text]},
             timeout=20
         )
-        response = res.json()
-        return response["data"][0]
-    except Exception as e:
-        return text.strip()  # если произошла ошибка — вернём оригинал
+        return res.json()["data"][0]
+    except Exception:
+        return text.strip()
 
 def is_garbage(text):
     return (
@@ -35,22 +29,21 @@ def clean_text(text):
 def clean_and_split_attributes(raw_attributes):
     seen = set()
     final_attrs = []
-    blacklist = ['dodaj do koszyka', 'zobacz produkt', 'cookie', 'facebook', '@', 'polityka', 'regulamin']
+    blacklist = ['cookie', 'facebook', 'dodaj do koszyka', 'regulamin', 'polityka']
 
     for attr in raw_attributes:
         name = attr.get("name", "").strip()
         value = attr.get("options", [""])[0].strip()
 
-        if any(b in name.lower() for b in blacklist) or any(b in value.lower() for b in blacklist):
+        if any(bad in name.lower() for bad in blacklist) or any(bad in value.lower() for bad in blacklist):
             continue
 
         lines = value.splitlines() + value.split(" ")
         for line in lines:
             if ":" in line:
                 key, val = map(str.strip, line.split(":", 1))
-                pair = (key.lower(), val.lower())
-                if pair not in seen and val:
-                    seen.add(pair)
+                if (key.lower(), val.lower()) not in seen and val:
+                    seen.add((key.lower(), val.lower()))
                     final_attrs.append({
                         "name": key.capitalize(),
                         "options": [val],
@@ -60,9 +53,8 @@ def clean_and_split_attributes(raw_attributes):
                     })
 
         if ":" not in value and len(value) < 100:
-            pair = (name.lower(), value.lower())
-            if pair not in seen:
-                seen.add(pair)
+            if (name.lower(), value.lower()) not in seen:
+                seen.add((name.lower(), value.lower()))
                 final_attrs.append({
                     "name": name.capitalize(),
                     "options": [value],
@@ -83,8 +75,8 @@ def generate():
         response = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(response.text, "html.parser")
 
-        title = soup.find("h1")
-        title = title.get_text(strip=True) if title else "Bez nazwy"
+        title_tag = soup.find("h1")
+        title = title_tag.get_text(strip=True) if title_tag else "Bez nazwy"
 
         desc_tag = soup.find("div", class_="product-description") or soup.find("div", class_="description")
         description = desc_tag.get_text(strip=True) if desc_tag else f"{title} to nowoczesny produkt."
@@ -135,4 +127,3 @@ def generate():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
-
