@@ -8,14 +8,19 @@ app = Flask(__name__)
 # Используем более лёгкую модель
 rephraser = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
 
+import requests
+
 def rewrite_description(text):
     try:
-        if not text or len(text) < 50:
-            return text.strip()
-        summary = rephraser(text[:500], max_length=130, min_length=50, do_sample=False)
-        return summary[0]['summary_text']
-    except Exception:
-        return text.strip()
+        res = requests.post(
+            "https://Apalkova-product-rewriter.hf.space/run/predict",
+            json={"data": [text]},
+            timeout=20
+        )
+        response = res.json()
+        return response["data"][0]
+    except Exception as e:
+        return text.strip()  # если произошла ошибка — вернём оригинал
 
 def is_garbage(text):
     return (
