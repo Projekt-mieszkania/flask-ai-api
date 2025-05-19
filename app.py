@@ -5,57 +5,47 @@ from transformers import pipeline
 
 app = Flask(__name__)
 
-# Загружаем модель для переписывания описаний (summarization)
+# AI-модель для перефразирования/сжатия
 rephraser = pipeline("summarization", model="facebook/bart-large-cnn")
-
-def rewrite_description(text):
-    if not text or len(text) < 30:
-        return text
-    try:
-        summary = rephraser(text[:1024], max_length=140, min_length=60, do_sample=False)
-        return summary[0]["summary_text"]
-    except:
-        return text
 
 def is_garbage(text):
     return (
         "var" in text or "=" in text or ";" in text or
-        "{" in text or "}" in text or len(text) > 100 or
+        "{" in text or "}" in text or len(text) > 300 or
         not any(c.isalnum() for c in text)
     )
 
 def clean_text(text):
     return text.replace("\n", " ").replace("\r", "").strip()
 
+def rewrite_description(text):
+    try:
+        summary = rephraser(text, max_length=180, min_length=60, do_sample=False)
+        return summary[0]['summary_text']
+    except Exception:
+        return text.strip()
+
 def clean_and_split_attributes(raw_attributes):
-    import re
     seen = set()
     final_attrs = []
-    blacklist = [
-        'dodaj do koszyka', 'zobacz produkt', 'zapytaj o cenę',
-        'cookie', 'facebook', 'google', '@', 'regulamin', 'polityka', 'projekt i realizacja'
-    ]
+    blacklist = ['dodaj do koszyka', 'zobacz produkt', 'cookie', 'facebook', 'regulamin', '@']
 
     for attr in raw_attributes:
         name = attr.get("name", "").strip()
         value = attr.get("options", [""])[0].strip()
 
-        if len(value) > 200 or any(bad in value.lower() for bad in blacklist):
-            continue
-        if any(bad in name.lower() for bad in blacklist):
+        if any(x in name.lower() for x in blacklist) or any(x in value.lower() for x in blacklist):
             continue
 
         lines = value.splitlines() + value.split(" ")
         for line in lines:
             if ":" in line:
                 key, val = map(str.strip, line.split(":", 1))
-                key = key.capitalize()
-                val = val.strip()
                 pair = (key.lower(), val.lower())
                 if pair not in seen and val:
                     seen.add(pair)
                     final_attrs.append({
-                        "name": key,
+                        "name": key.capitalize(),
                         "options": [val],
                         "slug": "",
                         "visible": True,
@@ -63,14 +53,12 @@ def clean_and_split_attributes(raw_attributes):
                     })
 
         if ":" not in value and len(value) < 100:
-            key = name.capitalize()
-            val = value
-            pair = (key.lower(), val.lower())
+            pair = (name.lower(), value.lower())
             if pair not in seen:
                 seen.add(pair)
                 final_attrs.append({
-                    "name": key,
-                    "options": [val],
+                    "name": name.capitalize(),
+                    "options": [value],
                     "slug": "",
                     "visible": True,
                     "variation": False
