@@ -1,50 +1,66 @@
 from flask import Flask, request, jsonify
 import requests
 from bs4 import BeautifulSoup
+import re
 
 app = Flask(__name__)
 
 def is_garbage(text):
+    bad_keywords = ["dodaj do koszyka", "facebook", "zł", "Darmowa dostawa"]
     return (
         "var" in text or "=" in text or ";" in text or
         "{" in text or "}" in text or len(text) > 100 or
-        not any(c.isalnum() for c in text)
+        not any(c.isalnum() for c in text) or
+        any(bad.lower() in text.lower() for bad in bad_keywords)
     )
 
-def rewrite_description(text):
-    return text  # Можно подключить HuggingFace при необходимости
+def clean_text(text):
+    return text.replace("\n", "
+").replace("\r", "").strip()
+
+def normalize_name(name):
+    return name.strip().capitalize()
+
+def split_value_into_attributes(name, value):
+    attributes = []
+    lines = value.splitlines()
+    for line in lines:
+        if ":" in line:
+            parts = line.split(":", 1)
+            key = normalize_name(parts[0])
+            val = parts[1].strip()
+            if not is_garbage(val):
+                attributes.append({
+                    "name": key,
+                    "options": [val],
+                    "slug": "",
+                    "visible": True,
+                    "variation": False
+                })
+    return attributes
 
 def clean_and_split_attributes(raw_attributes):
     seen = set()
     final_attrs = []
 
     for attr in raw_attributes:
-        name = attr["name"].strip()
-        value = attr["options"][0].strip()
+        name = clean_text(attr["name"])
+        value = clean_text(attr["options"][0])
 
-        # Расщепляем составные значения с переносами строк
-        if "\n" in value or "\r" in value or "\\n" in value:
-            for line in value.splitlines():
-                if ":" in line:
-                    sub_name, sub_value = line.split(":", 1)
-                    sub_name = sub_name.strip()
-                    sub_value = sub_value.strip()
-                    key = (sub_name.lower(), sub_value.lower())
-                    if key not in seen and not is_garbage(sub_name) and not is_garbage(sub_value):
-                        seen.add(key)
-                        final_attrs.append({
-                            "name": sub_name,
-                            "options": [sub_value],
-                            "slug": "",
-                            "visible": True,
-                            "variation": False
-                        })
+        if any(x in value for x in [":", "
+"]):
+            sub_attrs = split_value_into_attributes(name, value)
+            for sub in sub_attrs:
+                key = (sub["name"].lower(), sub["options"][0].lower())
+                if key not in seen:
+                    seen.add(key)
+                    final_attrs.append(sub)
         else:
             key = (name.lower(), value.lower())
             if key not in seen and not is_garbage(name) and not is_garbage(value):
                 seen.add(key)
                 final_attrs.append({
-                    "name": name,
+                    "name": normalize_name(name),
                     "options": [value],
                     "slug": "",
                     "visible": True,
@@ -69,21 +85,19 @@ def generate():
         desc_tag = soup.find("div", class_="product-description") or soup.find("div", class_="description")
         description = desc_tag.get_text(strip=True) if desc_tag else f"{title} to nowoczesny produkt."
 
-        rewritten = rewrite_description(description)
-
         images = []
         for img in soup.find_all("img"):
             src = img.get("src", "")
             if (
                 src.startswith("http")
-                and not any(x in src for x in ["logo", "icon", "facebook", "svg"])
-                and any(src.endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".webp"])
+                and not any(x in src.lower() for x in ["logo", "icon", "facebook", "svg"])
+                and any(src.lower().endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".webp"])
             ):
                 images.append(src)
             if len(images) >= 5:
                 break
 
-        # Собираем все сырые атрибуты (с примитивным поиском)
+        # Собираем атрибуты
         raw_attributes = []
         for tag in soup.find_all(["li", "div", "p", "span"]):
             text = tag.get_text(strip=True)
@@ -101,10 +115,10 @@ def generate():
 
         return jsonify({
             "title": title,
-            "description": rewritten,
+            "description": description,
             "seo": {
                 "meta_title": title,
-                "meta_description": rewritten[:160],
+                "meta_description": description[:160],
                 "keywords": [w.lower() for w in title.split() if len(w) > 3]
             },
             "images": images,
@@ -116,3 +130,4 @@ def generate():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
