@@ -5,8 +5,17 @@ from transformers import pipeline
 
 app = Flask(__name__)
 
-# AI-модель для перефразирования/сжатия
-rephraser = pipeline("summarization", model="facebook/bart-large-cnn")
+# Используем более лёгкую модель
+rephraser = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
+
+def rewrite_description(text):
+    try:
+        if not text or len(text) < 50:
+            return text.strip()
+        summary = rephraser(text[:500], max_length=130, min_length=50, do_sample=False)
+        return summary[0]['summary_text']
+    except Exception:
+        return text.strip()
 
 def is_garbage(text):
     return (
@@ -18,23 +27,16 @@ def is_garbage(text):
 def clean_text(text):
     return text.replace("\n", " ").replace("\r", "").strip()
 
-def rewrite_description(text):
-    try:
-        summary = rephraser(text, max_length=180, min_length=60, do_sample=False)
-        return summary[0]['summary_text']
-    except Exception:
-        return text.strip()
-
 def clean_and_split_attributes(raw_attributes):
     seen = set()
     final_attrs = []
-    blacklist = ['dodaj do koszyka', 'zobacz produkt', 'cookie', 'facebook', 'regulamin', '@']
+    blacklist = ['dodaj do koszyka', 'zobacz produkt', 'cookie', 'facebook', '@', 'polityka', 'regulamin']
 
     for attr in raw_attributes:
         name = attr.get("name", "").strip()
         value = attr.get("options", [""])[0].strip()
 
-        if any(x in name.lower() for x in blacklist) or any(x in value.lower() for x in blacklist):
+        if any(b in name.lower() for b in blacklist) or any(b in value.lower() for b in blacklist):
             continue
 
         lines = value.splitlines() + value.split(" ")
@@ -128,3 +130,4 @@ def generate():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
