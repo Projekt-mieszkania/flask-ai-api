@@ -1,9 +1,21 @@
 from flask import Flask, request, jsonify
 import requests
 from bs4 import BeautifulSoup
-import re
+from transformers import pipeline
 
 app = Flask(__name__)
+
+# Загружаем модель для переписывания описаний (summarization)
+rephraser = pipeline("summarization", model="facebook/bart-large-cnn")
+
+def rewrite_description(text):
+    if not text or len(text) < 30:
+        return text
+    try:
+        summary = rephraser(text[:1024], max_length=140, min_length=60, do_sample=False)
+        return summary[0]["summary_text"]
+    except:
+        return text
 
 def is_garbage(text):
     return (
@@ -16,6 +28,7 @@ def clean_text(text):
     return text.replace("\n", " ").replace("\r", "").strip()
 
 def clean_and_split_attributes(raw_attributes):
+    import re
     seen = set()
     final_attrs = []
     blacklist = [
@@ -24,46 +37,32 @@ def clean_and_split_attributes(raw_attributes):
     ]
 
     for attr in raw_attributes:
-        name = clean_text(attr.get("name", ""))
-        value = clean_text(attr.get("options", [""])[0])
+        name = attr.get("name", "").strip()
+        value = attr.get("options", [""])[0].strip()
 
-        if any(bad in name.lower() for bad in blacklist) or any(bad in value.lower() for bad in blacklist):
+        if len(value) > 200 or any(bad in value.lower() for bad in blacklist):
+            continue
+        if any(bad in name.lower() for bad in blacklist):
             continue
 
-        # Попытка вытащить размеры и параметры из текста
-        matches = re.findall(r"(szerokość|wysokość|głębokość)[:\s]*([\d,\.]+ ?cm?)", value.lower())
-        for key, val in matches:
-            key = key.capitalize()
-            pair = (key.lower(), val.lower())
-            if pair not in seen:
-                seen.add(pair)
-                final_attrs.append({
-                    "name": key,
-                    "options": [val],
-                    "slug": "",
-                    "visible": True,
-                    "variation": False
-                })
+        lines = value.splitlines() + value.split(" ")
+        for line in lines:
+            if ":" in line:
+                key, val = map(str.strip, line.split(":", 1))
+                key = key.capitalize()
+                val = val.strip()
+                pair = (key.lower(), val.lower())
+                if pair not in seen and val:
+                    seen.add(pair)
+                    final_attrs.append({
+                        "name": key,
+                        "options": [val],
+                        "slug": "",
+                        "visible": True,
+                        "variation": False
+                    })
 
-        # Обработка ключ: значение
-        if ":" in value:
-            for line in value.splitlines():
-                if ":" in line:
-                    key, val = map(str.strip, line.split(":", 1))
-                    key = key.capitalize()
-                    val = val.strip()
-                    pair = (key.lower(), val.lower())
-                    if pair not in seen and not is_garbage(key) and not is_garbage(val):
-                        seen.add(pair)
-                        final_attrs.append({
-                            "name": key,
-                            "options": [val],
-                            "slug": "",
-                            "visible": True,
-                            "variation": False
-                        })
-        # Если просто пара "имя — значение"
-        elif len(value) < 100 and not is_garbage(name) and not is_garbage(value):
+        if ":" not in value and len(value) < 100:
             key = name.capitalize()
             val = value
             pair = (key.lower(), val.lower())
@@ -95,6 +94,8 @@ def generate():
         desc_tag = soup.find("div", class_="product-description") or soup.find("div", class_="description")
         description = desc_tag.get_text(strip=True) if desc_tag else f"{title} to nowoczesny produkt."
 
+        rewritten = rewrite_description(description)
+
         images = []
         for img in soup.find_all("img"):
             src = img.get("src", "")
@@ -124,10 +125,10 @@ def generate():
 
         return jsonify({
             "title": title,
-            "description": description,
+            "description": rewritten,
             "seo": {
                 "meta_title": title,
-                "meta_description": description[:160],
+                "meta_description": rewritten[:160],
                 "keywords": [w.lower() for w in title.split() if len(w) > 3]
             },
             "images": images,
