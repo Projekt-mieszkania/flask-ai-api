@@ -1,19 +1,9 @@
 from flask import Flask, request, jsonify
 import requests
 from bs4 import BeautifulSoup
-from woocommerce import API
 
 app = Flask(__name__)
 
-# Подключение к WooCommerce
-wcapi = API(
-    url="https://projekt-mieszkania.pl",
-    consumer_key="ck_f5c91a1d42a5dc898fe3fea084d464a29b9a2466",       # ← замените на ваш
-    consumer_secret="cs_2d80076cdfa0e571855e1965115387ec5946495b",  # ← замените на ваш
-    version="wc/v3"
-)
-
-# Проверка "мусорного" текста
 def is_garbage(text):
     return (
         "var" in text or "=" in text or ";" in text or
@@ -21,51 +11,35 @@ def is_garbage(text):
         not any(c.isalnum() for c in text)
     )
 
-# Очистка текста
 def clean_text(text):
     return text.replace("\n", " ").replace("\r", "").strip()
 
-# Проверка и добавление атрибута в WooCommerce
-def ensure_attribute_exists(name, slug):
-    try:
-        existing = wcapi.get("products/attributes").json()
-        existing_names = [attr["name"].lower() for attr in existing]
-        if name.lower() not in existing_names:
-            wcapi.post("products/attributes", {
-                "name": name,
-                "slug": slug,
-                "type": "select",
-                "has_archives": True
-            })
-    except Exception as e:
-        print(f"⚠️ Ошибка добавления атрибута '{name}': {e}")
-
-# Обработка атрибутов
 def clean_and_split_attributes(raw_attributes):
+    import re
     seen = set()
     final_attrs = []
-    blacklist = ['dodaj do koszyka', 'zapytaj o cenę', 'zobacz produkt', 'darmowa dostawa']
+    blacklist = [
+        'dodaj do koszyka', 'zobacz produkt', 'zapytaj o cenę',
+        'cookie', 'facebook', 'google', '@', 'regulamin', 'polityka', 'projekt i realizacja'
+    ]
 
     for attr in raw_attributes:
         name = attr.get("name", "").strip()
         value = attr.get("options", [""])[0].strip()
 
-        # Игнорируем мусор
-        if any(bad in value.lower() for bad in blacklist):
+        if len(value) > 200 or any(bad in value.lower() for bad in blacklist):
+            continue
+        if any(bad in name.lower() for bad in blacklist):
             continue
 
-        # Разбиваем составные значения с двоеточием
-        lines = value.splitlines()
-        if len(lines) == 1:
-            lines = [value]
-
+        # Разбиваем подстроки по переносам или пробелам
+        lines = value.splitlines() + value.split(" ")
         for line in lines:
             if ":" in line:
-                key, val = line.split(":", 1)
-                key = key.strip().capitalize()
+                key, val = map(str.strip, line.split(":", 1))
+                key = key.capitalize()
                 val = val.strip()
                 pair = (key.lower(), val.lower())
-
                 if pair not in seen and val:
                     seen.add(pair)
                     final_attrs.append({
@@ -75,21 +49,20 @@ def clean_and_split_attributes(raw_attributes):
                         "visible": True,
                         "variation": False
                     })
-            else:
-                # Обрабатываем строку без ":" если она уникальна и не мусор
-                key = name.strip().capitalize()
-                val = line.strip()
-                pair = (key.lower(), val.lower())
 
-                if pair not in seen and val and all(b not in val.lower() for b in blacklist):
-                    seen.add(pair)
-                    final_attrs.append({
-                        "name": key,
-                        "options": [val],
-                        "slug": "",
-                        "visible": True,
-                        "variation": False
-                    })
+        if ":" not in value and len(value) < 100:
+            key = name.capitalize()
+            val = value
+            pair = (key.lower(), val.lower())
+            if pair not in seen:
+                seen.add(pair)
+                final_attrs.append({
+                    "name": key,
+                    "options": [val],
+                    "slug": "",
+                    "visible": True,
+                    "variation": False
+                })
 
     return final_attrs
 
@@ -103,15 +76,12 @@ def generate():
         response = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(response.text, "html.parser")
 
-        # Заголовок
         title = soup.find("h1")
         title = title.get_text(strip=True) if title else "Bez nazwy"
 
-        # Описание
         desc_tag = soup.find("div", class_="product-description") or soup.find("div", class_="description")
         description = desc_tag.get_text(strip=True) if desc_tag else f"{title} to nowoczesny produkt."
 
-        # Изображения
         images = []
         for img in soup.find_all("img"):
             src = img.get("src", "")
@@ -124,7 +94,6 @@ def generate():
             if len(images) >= 5:
                 break
 
-        # Сырые атрибуты
         raw_attributes = []
         for tag in soup.find_all(["li", "div", "p", "span"]):
             text = tag.get_text(strip=True)
