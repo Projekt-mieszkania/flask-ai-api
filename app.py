@@ -4,24 +4,6 @@ from bs4 import BeautifulSoup
 
 app = Flask(__name__)
 
-WC_URL = "https://projekt-mieszkania.pl"
-WC_KEY = "ck_f5c91a1d42a5dc898fe3fea084d464a29b9a2466"
-WC_SECRET = "cs_2d80076cdfa0e571855e1965115387ec5946495b"
-
-HUGGINGFACE_API_URL = "https://api-inference.huggingface.co/models/tiiuae/falcon-7b-instruct"
-
-def get_wc_attributes():
-    try:
-        response = requests.get(
-            f"{WC_URL}/wp-json/wc/v3/products/attributes",
-            auth=(WC_KEY, WC_SECRET),
-            timeout=10
-        )
-        data = response.json()
-        return {item["name"]: item["slug"] for item in data}
-    except Exception:
-        return {}
-
 def is_garbage(text):
     return (
         "var" in text or "=" in text or ";" in text or
@@ -30,122 +12,93 @@ def is_garbage(text):
     )
 
 def rewrite_description(text):
-    payload = {
-        "inputs": f"Przepisz ten opis produktu w sposób unikalny, naturalny i marketingowy:\n{text}"
-    }
-    try:
-        response = requests.post(HUGGINGFACE_API_URL, json=payload, timeout=60)
-        result = response.json()
-        if isinstance(result, list) and "generated_text" in result[0]:
-            return result[0]["generated_text"]
+    return text  # Можно подключить HuggingFace при необходимости
+
+def clean_and_split_attributes(raw_attributes):
+    seen = set()
+    final_attrs = []
+
+    for attr in raw_attributes:
+        name = attr["name"].strip()
+        value = attr["options"][0].strip()
+
+        # Расщепляем составные значения с переносами строк
+        if "\n" in value or "
+" in value:
+            for line in value.splitlines():
+                if ":" in line:
+                    sub_name, sub_value = line.split(":", 1)
+                    sub_name = sub_name.strip()
+                    sub_value = sub_value.strip()
+                    key = (sub_name.lower(), sub_value.lower())
+                    if key not in seen and not is_garbage(sub_name) and not is_garbage(sub_value):
+                        seen.add(key)
+                        final_attrs.append({
+                            "name": sub_name,
+                            "options": [sub_value],
+                            "slug": "",
+                            "visible": True,
+                            "variation": False
+                        })
         else:
-            return text
-    except Exception:
-        return text
-
-def extract_attributes(soup, wc_slugs):
-    attributes = []
-
-    # 1. Таблицы
-    for table in soup.find_all("table"):
-        for row in table.find_all("tr"):
-            cols = row.find_all(["td", "th"])
-            if len(cols) >= 2:
-                name = cols[0].get_text(strip=True).strip(":")
-                value = cols[1].get_text(strip=True)
-                if name and value and not is_garbage(name) and not is_garbage(value):
-                    attributes.append({
-                        "name": name,
-                        "slug": wc_slugs.get(name, ""),
-                        "options": [value],
-                        "visible": True,
-                        "variation": False
-                    })
-
-    # 2. Списки ul > li с двоеточием
-    for li in soup.find_all("li"):
-        if ":" in li.get_text():
-            parts = li.get_text().split(":", 1)
-            name, value = parts[0].strip(), parts[1].strip()
-            if name and value and not is_garbage(name) and not is_garbage(value):
-                attributes.append({
+            key = (name.lower(), value.lower())
+            if key not in seen and not is_garbage(name) and not is_garbage(value):
+                seen.add(key)
+                final_attrs.append({
                     "name": name,
-                    "slug": wc_slugs.get(name, ""),
                     "options": [value],
+                    "slug": "",
                     "visible": True,
                     "variation": False
                 })
 
-    # 3. div/p/span с двоеточием
-    for tag in soup.find_all(["div", "p", "span"]):
-        if ":" in tag.get_text():
-            parts = tag.get_text().split(":", 1)
-            name, value = parts[0].strip(), parts[1].strip()
-            if name and value and not is_garbage(name) and not is_garbage(value):
-                attributes.append({
-                    "name": name,
-                    "slug": wc_slugs.get(name, ""),
-                    "options": [value],
-                    "visible": True,
-                    "variation": False
-                })
-
-    # 4. dt/dd из <dl>
-    for dt in soup.find_all("dt"):
-        dd = dt.find_next_sibling("dd")
-        if dd:
-            name = dt.get_text(strip=True)
-            value = dd.get_text(strip=True)
-            if name and value and not is_garbage(name) and not is_garbage(value):
-                attributes.append({
-                    "name": name,
-                    "slug": wc_slugs.get(name, ""),
-                    "options": [value],
-                    "visible": True,
-                    "variation": False
-                })
-
-    return attributes
+    return final_attrs
 
 @app.route("/generate", methods=["POST"])
 def generate():
     data = request.get_json()
     url = data.get("url")
+
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
         response = requests.get(url, headers=headers, timeout=10)
-        soup = BeautifulSoup(response.text, 'html.parser')
+        soup = BeautifulSoup(response.text, "html.parser")
 
-        wc_slugs = get_wc_attributes()
+        title = soup.find("h1")
+        title = title.get_text(strip=True) if title else "Bez nazwy"
 
-        title = "Bez nazwy"
-        for selector in ['h1', 'h1.product-title', 'meta[property="og:title"]']:
-            tag = soup.select_one(selector)
-            if tag:
-                title = tag.get_text(strip=True) if tag.name != 'meta' else tag.get("content", "").strip()
-                break
-
-        description = ""
-        for selector in ['div.description', 'div.product-description', 'meta[name="description"]']:
-            tag = soup.select_one(selector)
-            if tag:
-                description = tag.get_text(strip=True) if tag.name != 'meta' else tag.get("content", "").strip()
-                break
-
-        if not description:
-            description = f"{title} to nowoczesny produkt wysokiej jakości."
+        desc_tag = soup.find("div", class_="product-description") or soup.find("div", class_="description")
+        description = desc_tag.get_text(strip=True) if desc_tag else f"{title} to nowoczesny produkt."
 
         rewritten = rewrite_description(description)
 
         images = []
         for img in soup.find_all("img"):
-            src = img.get("src")
-            if src and src.startswith("http") and "CatImg" not in src and "icon" not in src:
+            src = img.get("src", "")
+            if (
+                src.startswith("http")
+                and not any(x in src for x in ["logo", "icon", "facebook", "svg"])
+                and any(src.endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".webp"])
+            ):
                 images.append(src)
             if len(images) >= 5:
                 break
 
-        attributes = extract_attributes(soup, wc_slugs)
+        # Собираем все сырые атрибуты (с примитивным поиском)
+        raw_attributes = []
+        for tag in soup.find_all(["li", "div", "p", "span"]):
+            text = tag.get_text(strip=True)
+            if ":" in text:
+                parts = text.split(":", 1)
+                raw_attributes.append({
+                    "name": parts[0],
+                    "options": [parts[1]],
+                    "slug": "",
+                    "visible": True,
+                    "variation": False
+                })
+
+        attributes = clean_and_split_attributes(raw_attributes)
 
         return jsonify({
             "title": title,
@@ -153,7 +106,7 @@ def generate():
             "seo": {
                 "meta_title": title,
                 "meta_description": rewritten[:160],
-                "keywords": [word.lower() for word in title.split() if len(word) > 3]
+                "keywords": [w.lower() for w in title.split() if len(w) > 3]
             },
             "images": images,
             "attributes": attributes
@@ -164,4 +117,3 @@ def generate():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
-
