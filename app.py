@@ -1,65 +1,56 @@
 from flask import Flask, request, jsonify
 import requests
 from bs4 import BeautifulSoup
-import re
 
 app = Flask(__name__)
 
 def is_garbage(text):
-    bad_keywords = ["dodaj do koszyka", "facebook", "zł", "Darmowa dostawa"]
     return (
         "var" in text or "=" in text or ";" in text or
         "{" in text or "}" in text or len(text) > 100 or
-        not any(c.isalnum() for c in text) or
-        any(bad.lower() in text.lower() for bad in bad_keywords)
+        not any(c.isalnum() for c in text)
     )
 
 def clean_text(text):
-    return text.replace("\\n", " ").replace("\\r", "").strip()
-
-def normalize_name(name):
-    return name.strip().capitalize()
-
-def split_value_into_attributes(name, value):
-    attributes = []
-    lines = value.splitlines()
-    for line in lines:
-        if ":" in line:
-            parts = line.split(":", 1)
-            key = normalize_name(parts[0])
-            val = parts[1].strip()
-            if not is_garbage(val):
-                attributes.append({
-                    "name": key,
-                    "options": [val],
-                    "slug": "",
-                    "visible": True,
-                    "variation": False
-                })
-    return attributes
+    return text.replace("\n", " ").replace("\r", "").strip()
 
 def clean_and_split_attributes(raw_attributes):
     seen = set()
     final_attrs = []
+    blacklist = ['dodaj do koszyka', 'zapytaj o cenę', 'darmowa dostawa', 'facebook']
 
     for attr in raw_attributes:
         name = clean_text(attr["name"])
         value = clean_text(attr["options"][0])
 
-        if any(x in value for x in [":", "\\n"]):
-            sub_attrs = split_value_into_attributes(name, value)
-            for sub in sub_attrs:
-                key = (sub["name"].lower(), sub["options"][0].lower())
-                if key not in seen:
-                    seen.add(key)
-                    final_attrs.append(sub)
-        else:
-            key = (name.lower(), value.lower())
-            if key not in seen and not is_garbage(name) and not is_garbage(value):
-                seen.add(key)
+        if any(bad in value.lower() for bad in blacklist):
+            continue
+
+        lines = value.splitlines()
+        for line in lines:
+            if ":" in line:
+                key, val = map(str.strip, line.split(":", 1))
+                key = key.capitalize()
+                val = val.strip()
+                pair = (key.lower(), val.lower())
+                if pair not in seen and not is_garbage(key) and not is_garbage(val):
+                    seen.add(pair)
+                    final_attrs.append({
+                        "name": key,
+                        "options": [val],
+                        "slug": "",
+                        "visible": True,
+                        "variation": False
+                    })
+        if ":" not in value:
+            key = name.capitalize()
+            val = value
+            pair = (key.lower(), val.lower())
+            if pair not in seen and not is_garbage(key) and not is_garbage(val):
+                seen.add(pair)
                 final_attrs.append({
-                    "name": normalize_name(name),
-                    "options": [value],
+                    "name": key,
+                    "options": [val],
                     "slug": "",
                     "visible": True,
                     "variation": False
@@ -77,12 +68,15 @@ def generate():
         response = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(response.text, "html.parser")
 
+        # Заголовок
         title = soup.find("h1")
         title = title.get_text(strip=True) if title else "Bez nazwy"
 
+        # Описание
         desc_tag = soup.find("div", class_="product-description") or soup.find("div", class_="description")
         description = desc_tag.get_text(strip=True) if desc_tag else f"{title} to nowoczesny produkt."
 
+        # Изображения
         images = []
         for img in soup.find_all("img"):
             src = img.get("src", "")
@@ -95,6 +89,7 @@ def generate():
             if len(images) >= 5:
                 break
 
+        # Сырые атрибуты
         raw_attributes = []
         for tag in soup.find_all(["li", "div", "p", "span"]):
             text = tag.get_text(strip=True)
