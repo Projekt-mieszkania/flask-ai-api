@@ -4,23 +4,22 @@ from bs4 import BeautifulSoup
 
 app = Flask(__name__)
 
-# Подключение к Hugging Face Space
+HF_API_URL = "https://Apalkova-product-rewriter.hf.space/run/predict"
+
 def rewrite_description(text):
     try:
-        res = requests.post(
-            "https://Apalkova-product-rewriter.hf.space/run/predict",
-            json={"data": [text]},
-            timeout=20
-        )
-        return res.json()["data"][0]
+        res = requests.post(HF_API_URL, json={"data": [text]}, timeout=20)
+        return res.json()["data"][0].strip()
     except Exception:
         return text.strip()
 
 def is_garbage(text):
+    garbage_signals = ["cookie", "facebook", "napisz", "projekt", "@", "mailto"]
     return (
-        "var" in text or "=" in text or ";" in text or
-        "{" in text or "}" in text or len(text) > 300 or
-        not any(c.isalnum() for c in text)
+        any(x in text.lower() for x in garbage_signals)
+        or any(c in text for c in ["=", "{", "}", ";"])
+        or len(text) > 150
+        or not any(c.isalnum() for c in text)
     )
 
 def clean_text(text):
@@ -29,32 +28,34 @@ def clean_text(text):
 def clean_and_split_attributes(raw_attributes):
     seen = set()
     final_attrs = []
-    blacklist = ['cookie', 'facebook', 'dodaj do koszyka', 'regulamin', 'polityka']
 
     for attr in raw_attributes:
-        name = attr.get("name", "").strip()
-        value = attr.get("options", [""])[0].strip()
+        name = clean_text(attr.get("name", ""))
+        value = clean_text(attr.get("options", [""])[0])
 
-        if any(bad in name.lower() for bad in blacklist) or any(bad in value.lower() for bad in blacklist):
+        if is_garbage(name) or is_garbage(value):
             continue
 
         lines = value.splitlines() + value.split(" ")
         for line in lines:
             if ":" in line:
                 key, val = map(str.strip, line.split(":", 1))
-                if (key.lower(), val.lower()) not in seen and val:
-                    seen.add((key.lower(), val.lower()))
-                    final_attrs.append({
-                        "name": key.capitalize(),
-                        "options": [val],
-                        "slug": "",
-                        "visible": True,
-                        "variation": False
-                    })
+                if not is_garbage(key) and not is_garbage(val):
+                    pair = (key.lower(), val.lower())
+                    if pair not in seen:
+                        seen.add(pair)
+                        final_attrs.append({
+                            "name": key.capitalize(),
+                            "options": [val],
+                            "slug": "",
+                            "visible": True,
+                            "variation": False
+                        })
 
         if ":" not in value and len(value) < 100:
-            if (name.lower(), value.lower()) not in seen:
-                seen.add((name.lower(), value.lower()))
+            pair = (name.lower(), value.lower())
+            if pair not in seen:
+                seen.add(pair)
                 final_attrs.append({
                     "name": name.capitalize(),
                     "options": [value],
@@ -80,7 +81,6 @@ def generate():
 
         desc_tag = soup.find("div", class_="product-description") or soup.find("div", class_="description")
         description = desc_tag.get_text(strip=True) if desc_tag else f"{title} to nowoczesny produkt."
-
         rewritten = rewrite_description(description)
 
         images = []
@@ -127,3 +127,4 @@ def generate():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
