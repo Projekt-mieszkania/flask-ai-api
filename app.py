@@ -30,9 +30,13 @@ def clean_text(text):
     return text.replace("\n", " ").replace("\r", "").strip()
 
 def extract_clean_name_value(name, value):
-    match = re.match(r"(?P<num>\d{2,4})\s*cm(\s*)?(?P<txt>[a-zA-Ząćęłńóśźż]+)", name)
+    # Попытка найти шаблон типа: число + "cm" + текст без пробелов
+    match = re.search(r"(\\d{2,4})\\s*cm(\\s*)?([a-ząćęłńóśźż]+)", name.lower())
     if match:
-        return match.group("txt").capitalize(), f"{match.group('num')} cm"
+        val = f"{match.group(1)} cm"
+        label = match.group(3).capitalize()
+        return label, val
+
     return name.capitalize(), value.strip()
 
 def clean_and_split_attributes(raw_attributes):
