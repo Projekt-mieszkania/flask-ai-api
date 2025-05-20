@@ -9,10 +9,14 @@ HF_API_URL = "https://Apalkova-product-rewriter.hf.space/run/predict"
 
 def rewrite_description(text):
     try:
+        if not text or len(text.strip()) < 50:
+            return f"{text.strip()} - to doskonały wybór dla każdego wnętrza. Poznaj więcej szczegółów!"
         res = requests.post(HF_API_URL, json={"data": [text]}, timeout=20)
-        return res.json()["data"][0].strip()
-    except Exception:
-        return text.strip()
+        response = res.json()
+        return response["data"][0].strip()
+    except Exception as e:
+        print(f"[AI-ERROR]: {e}")
+        return f"{text.strip()} - to doskonały wybór dla każdego wnętrza. Sprawdź ofertę!"
 
 def is_garbage(text):
     garbage_signals = [
@@ -30,13 +34,11 @@ def clean_text(text):
     return text.replace("\n", " ").replace("\r", "").strip()
 
 def extract_clean_name_value(name, value):
-    # Попытка найти шаблон типа: число + "cm" + текст без пробелов
-    match = re.search(r"(\\d{2,4})\\s*cm(\\s*)?([a-ząćęłńóśźż]+)", name.lower())
+    match = re.search(r"(\d{2,4})\s*cm(\s*)?([a-ząćęłńóśźż]+)", name.lower())
     if match:
         val = f"{match.group(1)} cm"
         label = match.group(3).capitalize()
         return label, val
-
     return name.capitalize(), value.strip()
 
 def clean_and_split_attributes(raw_attributes):
