@@ -10,7 +10,7 @@ HF_API_URL = "https://Apalkova-product-rewriter.hf.space/run/predict"
 def rewrite_description(text):
     try:
         if not text or len(text.strip()) < 50:
-            return f"{text.strip()} - to doskonały wybór dla każdego wnętrza. Poznaj więcej szczegółów!"
+            return f"{text.strip()} - to doskonały wybór dla każdego wnętrza. Sprawdź ofertę!"
         res = requests.post(HF_API_URL, json={"data": [text]}, timeout=20)
         response = res.json()
         return response["data"][0].strip()
@@ -33,16 +33,31 @@ def is_garbage(text):
 def clean_text(text):
     return text.replace("\n", " ").replace("\r", "").strip()
 
+def normalize_unit_name(name):
+    mapping = {
+        "cmwysokość": "Wysokość",
+        "cmgłębokość": "Głębokość",
+        "cm": ""  # на случай дополнительных склеек
+    }
+    name = name.lower().strip()
+    for k, v in mapping.items():
+        if k in name:
+            return v
+    return name.capitalize()
+
 def extract_clean_name_value(name, value):
     match = re.search(r"(\d{2,4})\s*cm(\s*)?([a-ząćęłńóśźż]+)", name.lower())
     if match:
         val = f"{match.group(1)} cm"
         label = match.group(3).capitalize()
         return label, val
-    return name.capitalize(), value.strip()
+
+    # Попробуем нормализовать по известным шаблонам
+    label = normalize_unit_name(name)
+    return label, value.strip()
 
 def clean_and_split_attributes(raw_attributes):
-    seen = set()
+    seen = {}
     final_attrs = []
 
     for attr in raw_attributes:
@@ -56,35 +71,21 @@ def clean_and_split_attributes(raw_attributes):
         if is_garbage(name) or is_garbage(value):
             continue
 
-        if ":" in value:
-            lines = value.splitlines() + value.split(" ")
-            for line in lines:
-                if ":" in line:
-                    key, val = map(str.strip, line.split(":", 1))
-                    key, val = extract_clean_name_value(key, val)
-                    if not is_garbage(key) and not is_garbage(val):
-                        pair = (key.lower(), val.lower())
-                        if pair not in seen:
-                            seen.add(pair)
-                            final_attrs.append({
-                                "name": key,
-                                "options": [val],
-                                "slug": "",
-                                "visible": True,
-                                "variation": False
-                            })
+        key = name.lower()
+        val = value.strip()
+        if key in seen:
+            if val not in seen[key]["options"]:
+                seen[key]["options"].append(val)
         else:
-            pair = (name.lower(), value.lower())
-            if pair not in seen:
-                seen.add(pair)
-                final_attrs.append({
-                    "name": name,
-                    "options": [value],
-                    "slug": "",
-                    "visible": True,
-                    "variation": False
-                })
+            seen[key] = {
+                "name": name,
+                "options": [val],
+                "slug": "",
+                "visible": True,
+                "variation": False
+            }
 
+    final_attrs = list(seen.values())
     return final_attrs
 
 @app.route("/generate", methods=["POST"])
@@ -148,4 +149,3 @@ def generate():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
-
