@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 import requests
 from bs4 import BeautifulSoup
+import re
 
 app = Flask(__name__)
 
@@ -14,7 +15,10 @@ def rewrite_description(text):
         return text.strip()
 
 def is_garbage(text):
-    garbage_signals = ["cookie", "facebook", "napisz", "projekt", "@", "mailto"]
+    garbage_signals = [
+        "cookie", "facebook", "napisz", "projekt", "@", "mailto",
+        "dodaj do koszyka", "zobacz produkt", "zł", "promocja", "komoda", "produkt"
+    ]
     return (
         any(x in text.lower() for x in garbage_signals)
         or any(c in text for c in ["=", "{", "}", ";"])
@@ -25,39 +29,50 @@ def is_garbage(text):
 def clean_text(text):
     return text.replace("\n", " ").replace("\r", "").strip()
 
+def extract_clean_name_value(name, value):
+    match = re.match(r"(?P<num>\d{2,4})\s*cm(\s*)?(?P<txt>[a-zA-Ząćęłńóśźż]+)", name)
+    if match:
+        return match.group("txt").capitalize(), f"{match.group('num')} cm"
+    return name.capitalize(), value.strip()
+
 def clean_and_split_attributes(raw_attributes):
     seen = set()
     final_attrs = []
 
     for attr in raw_attributes:
-        name = clean_text(attr.get("name", ""))
-        value = clean_text(attr.get("options", [""])[0])
+        name_raw = clean_text(attr.get("name", ""))
+        value_raw = clean_text(attr.get("options", [""])[0])
 
+        if is_garbage(name_raw) or is_garbage(value_raw):
+            continue
+
+        name, value = extract_clean_name_value(name_raw, value_raw)
         if is_garbage(name) or is_garbage(value):
             continue
 
-        lines = value.splitlines() + value.split(" ")
-        for line in lines:
-            if ":" in line:
-                key, val = map(str.strip, line.split(":", 1))
-                if not is_garbage(key) and not is_garbage(val):
-                    pair = (key.lower(), val.lower())
-                    if pair not in seen:
-                        seen.add(pair)
-                        final_attrs.append({
-                            "name": key.capitalize(),
-                            "options": [val],
-                            "slug": "",
-                            "visible": True,
-                            "variation": False
-                        })
-
-        if ":" not in value and len(value) < 100:
+        if ":" in value:
+            lines = value.splitlines() + value.split(" ")
+            for line in lines:
+                if ":" in line:
+                    key, val = map(str.strip, line.split(":", 1))
+                    key, val = extract_clean_name_value(key, val)
+                    if not is_garbage(key) and not is_garbage(val):
+                        pair = (key.lower(), val.lower())
+                        if pair not in seen:
+                            seen.add(pair)
+                            final_attrs.append({
+                                "name": key,
+                                "options": [val],
+                                "slug": "",
+                                "visible": True,
+                                "variation": False
+                            })
+        else:
             pair = (name.lower(), value.lower())
             if pair not in seen:
                 seen.add(pair)
                 final_attrs.append({
-                    "name": name.capitalize(),
+                    "name": name,
                     "options": [value],
                     "slug": "",
                     "visible": True,
