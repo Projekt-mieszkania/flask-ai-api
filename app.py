@@ -31,7 +31,7 @@ def is_garbage(text):
     )
 
 def clean_text(text):
-    return text.replace("
+    return text.replace("\n", " ").replace("\r", "").strip()
 ", " ").replace("
 ", "").strip()
 
