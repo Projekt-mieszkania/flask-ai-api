@@ -37,7 +37,7 @@ def normalize_unit_name(name):
     mapping = {
         "cmwysokość": "Wysokość",
         "cmgłębokość": "Głębokość",
-        "cm": ""  # на случай дополнительных склеек
+        "cm": ""
     }
     name = name.lower().strip()
     for k, v in mapping.items():
@@ -51,10 +51,12 @@ def extract_clean_name_value(name, value):
         val = f"{match.group(1)} cm"
         label = match.group(3).capitalize()
         return label, val
-
-    # Попробуем нормализовать по известным шаблонам
     label = normalize_unit_name(name)
     return label, value.strip()
+
+def extract_dimensions_from_value(value):
+    found = re.findall(r"([A-ZŁŚĆŻŹa-złśąćęńóźż]+):\s*(\d+\s*cm)", value)
+    return [(k.capitalize(), v) for k, v in found] if found else []
 
 def clean_and_split_attributes(raw_attributes):
     seen = {}
@@ -65,6 +67,23 @@ def clean_and_split_attributes(raw_attributes):
         value_raw = clean_text(attr.get("options", [""])[0])
 
         if is_garbage(name_raw) or is_garbage(value_raw):
+            continue
+
+        dimensions = extract_dimensions_from_value(value_raw)
+        if dimensions:
+            for d_name, d_value in dimensions:
+                key = d_name.lower()
+                if key in seen:
+                    if d_value not in seen[key]["options"]:
+                        seen[key]["options"].append(d_value)
+                else:
+                    seen[key] = {
+                        "name": d_name,
+                        "options": [d_value],
+                        "slug": "",
+                        "visible": True,
+                        "variation": False
+                    }
             continue
 
         name, value = extract_clean_name_value(name_raw, value_raw)
@@ -79,7 +98,7 @@ def clean_and_split_attributes(raw_attributes):
         else:
             seen[key] = {
                 "name": name,
-                "options": [val],
+                "options": [value],
                 "slug": "",
                 "visible": True,
                 "variation": False
