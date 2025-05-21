@@ -32,8 +32,6 @@ def is_garbage(text):
 
 def clean_text(text):
     return text.replace("\n", " ").replace("\r", "").strip()
-", " ").replace("
-", "").strip()
 
 def normalize_unit_name(name):
     mapping = {
