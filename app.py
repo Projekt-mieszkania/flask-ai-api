@@ -21,7 +21,7 @@ def rewrite_description(text):
 def is_garbage(text):
     garbage_signals = [
         "cookie", "facebook", "napisz", "projekt", "@", "mailto",
-        "dodaj do koszyka", "zobacz produkt", "zł", "promocja", "komoda", "produkt"
+        "dodaj do koszyka", "zobacz produkt", "zł", "promocja", "produkt"
     ]
     return (
         any(x in text.lower() for x in garbage_signals)
@@ -124,6 +124,18 @@ def generate():
         description = desc_tag.get_text(strip=True) if desc_tag else f"{title} to nowoczesny produkt."
         rewritten = rewrite_description(description)
 
+        price = None
+        cat = None
+        price_tag = soup.find(text=re.compile(r"\d+[,\.]\d+\s*zł"))
+        if price_tag:
+            match = re.search(r"(\d+[\.,]?\d*)", price_tag)
+            if match:
+                price = match.group(1).replace(",", ".")
+
+        cat_tag = soup.find("span", class_="posted_in") or soup.find("span", class_="product-category")
+        if cat_tag:
+            cat = cat_tag.get_text(strip=True)
+
         images = []
         for img in soup.find_all("img"):
             src = img.get("src", "")
@@ -154,6 +166,8 @@ def generate():
         return jsonify({
             "title": title,
             "description": rewritten,
+            "price": price,
+            "category": cat,
             "seo": {
                 "meta_title": title,
                 "meta_description": rewritten[:160],
