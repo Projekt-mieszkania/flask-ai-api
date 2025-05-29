@@ -60,41 +60,16 @@ def extract_dimensions_from_value(value):
 
 def clean_and_split_attributes(raw_attributes):
     seen = {}
-    final_attrs = []
-
     for attr in raw_attributes:
         name_raw = clean_text(attr.get("name", ""))
         value_raw = clean_text(attr.get("options", [""])[0])
-
         if is_garbage(name_raw) or is_garbage(value_raw):
             continue
-
-        dimensions = extract_dimensions_from_value(value_raw)
-        if dimensions:
-            for d_name, d_value in dimensions:
-                key = d_name.lower()
-                if key in seen:
-                    if d_value not in seen[key]["options"]:
-                        seen[key]["options"].append(d_value)
-                else:
-                    seen[key] = {
-                        "name": d_name,
-                        "options": [d_value],
-                        "slug": "",
-                        "visible": True,
-                        "variation": False
-                    }
-            continue
-
         name, value = extract_clean_name_value(name_raw, value_raw)
-        if is_garbage(name) or is_garbage(value):
-            continue
-
         key = name.lower()
-        val = value.strip()
         if key in seen:
-            if val not in seen[key]["options"]:
-                seen[key]["options"].append(val)
+            if value not in seen[key]["options"]:
+                seen[key]["options"].append(value)
         else:
             seen[key] = {
                 "name": name,
@@ -103,9 +78,7 @@ def clean_and_split_attributes(raw_attributes):
                 "visible": True,
                 "variation": False
             }
-
-    final_attrs = list(seen.values())
-    return final_attrs
+    return list(seen.values())
 
 @app.route("/generate", methods=["POST"])
 def generate():
@@ -149,6 +122,8 @@ def generate():
                 break
 
         raw_attributes = []
+
+        # 1. Общие текстовые блоки
         for tag in soup.find_all(["li", "div", "p", "span"]):
             text = tag.get_text(strip=True)
             if ":" in text:
@@ -160,6 +135,21 @@ def generate():
                     "visible": True,
                     "variation": False
                 })
+
+        # 2. Поиск таблиц (например, DANE TECHNICZNE)
+        for table in soup.find_all("table"):
+            for row in table.find_all("tr"):
+                cells = row.find_all(["td", "th"])
+                if len(cells) == 2:
+                    name = clean_text(cells[0].get_text())
+                    value = clean_text(cells[1].get_text())
+                    raw_attributes.append({
+                        "name": name,
+                        "options": [value],
+                        "slug": "",
+                        "visible": True,
+                        "variation": False
+                    })
 
         attributes = clean_and_split_attributes(raw_attributes)
 
