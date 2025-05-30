@@ -60,33 +60,36 @@ def extract_dimensions_from_value(value):
 
 def clean_and_split_attributes(raw_attributes):
     seen = {}
+
     for attr in raw_attributes:
         name_raw = clean_text(attr.get("name", ""))
         value_raw = clean_text(attr.get("options", [""])[0])
 
-        # 1. Обработка склеенных атрибутов, например: "Szerokość: 40 cmwysokość:54 cmgłębokość:41 cm"
-        if re.findall(r"[a-zA-ZąćęłńóśźżĄĆĘŁŃÓŚŹŻ]+:\s*\d+", value_raw):
-            found = re.findall(r"([a-zA-ZąćęłńóśźżĄĆĘŁŃÓŚŹŻ]+):\s*([\d.,]+ ?cm?)", value_raw)
-            for k, v in found:
-                k = k.strip()
-                v = v.strip()
-                key = k.lower()
+        # Обработка строки вида "Szerokość: 40 cmwysokość:54 cmgłębokość:41 cm"
+        segments = re.findall(r"([A-Za-ząćęłńóśźżĄĆĘŁŃÓŚŹŻ\s]+):\s*([\d.,]+\s*(?:cm|mm|kg|g)?)", value_raw)
+        if segments and len(segments) > 1:
+            for name, val in segments:
+                name = clean_text(name)
+                val = clean_text(val)
+                key = name.lower()
                 if key in seen:
-                    if v not in seen[key]["options"]:
-                        seen[key]["options"].append(v)
+                    if val not in seen[key]["options"]:
+                        seen[key]["options"].append(val)
                 else:
                     seen[key] = {
-                        "name": k,
-                        "options": [v],
+                        "name": name,
+                        "options": [val],
                         "slug": "",
                         "visible": True,
                         "variation": False
                     }
             continue
 
+        # Пропуск мусора
         if is_garbage(name_raw) or is_garbage(value_raw):
             continue
 
+        # Обычная пара
         name, value = extract_clean_name_value(name_raw, value_raw)
         key = name.lower()
         if key in seen:
@@ -100,7 +103,9 @@ def clean_and_split_attributes(raw_attributes):
                 "visible": True,
                 "variation": False
             }
+
     return list(seen.values())
+
 @app.route("/generate", methods=["POST"])
 def generate():
     data = request.get_json()
