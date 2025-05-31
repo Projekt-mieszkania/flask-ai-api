@@ -2,21 +2,24 @@ from flask import Flask, request, jsonify
 import requests
 from bs4 import BeautifulSoup
 import re
+from g4f import ChatCompletion, models, Provider
 
 app = Flask(__name__)
 
-HF_API_URL = "https://Apalkova-product-rewriter.hf.space/run/predict"
-
-def rewrite_description(text):
+# Локальная генерация описания с G4F
+def generate_unique_description(text):
     try:
-        if not text or len(text.strip()) < 50:
-            return f"{text.strip()} - to doskonały wybór dla każdego wnętrza. Sprawdź ofertę!"
-        res = requests.post(HF_API_URL, json={"data": [text]}, timeout=20)
-        response = res.json()
-        return response["data"][0].strip()
+        return ChatCompletion.create(
+            model=models.gpt_3_5_turbo,
+            provider=Provider.GptGo,
+            messages=[
+                {"role": "system", "content": "Ты маркетолог. Напиши красивое и продающее описание товара для сайта."},
+                {"role": "user", "content": text}
+            ]
+        )
     except Exception as e:
-        print(f"[AI-ERROR]: {e}")
-        return f"{text.strip()} - to doskonały wybór dla każdego wnętrza. Sprawdź ofertę!"
+        print(f"[G4F ERROR] {e}")
+        return text + " - to doskonały wybór dla każdego wnętrza. Sprawdź ofertę!"
 
 def is_garbage(text):
     garbage_signals = [
@@ -65,7 +68,7 @@ def clean_and_split_attributes(raw_attributes):
         name_raw = clean_text(attr.get("name", ""))
         value_raw = clean_text(attr.get("options", [""])[0])
 
-        # Обработка строки вида "Szerokość: 40 cmwysokość:54 cmgłębokość:41 cm"
+        # Обработка склеенных атрибутов, например: "Szerokość: 40 cmwysokość:54 cmgłębokość:41 cm"
         segments = re.findall(r"([A-Za-ząćęłńóśźżĄĆĘŁŃÓŚŹŻ\s]+):\s*([\d.,]+\s*(?:cm|mm|kg|g)?)", value_raw)
         if segments and len(segments) > 1:
             for name, val in segments:
@@ -85,11 +88,9 @@ def clean_and_split_attributes(raw_attributes):
                     }
             continue
 
-        # Пропуск мусора
         if is_garbage(name_raw) or is_garbage(value_raw):
             continue
 
-        # Обычная пара
         name, value = extract_clean_name_value(name_raw, value_raw)
         key = name.lower()
         if key in seen:
@@ -121,7 +122,8 @@ def generate():
 
         desc_tag = soup.find("div", class_="product-description") or soup.find("div", class_="description")
         description = desc_tag.get_text(strip=True) if desc_tag else f"{title} to nowoczesny produkt."
-        rewritten = rewrite_description(description)
+
+        rewritten = generate_unique_description(description) if data.get("rewrite") else description
 
         price = None
         cat = None
@@ -149,7 +151,6 @@ def generate():
 
         raw_attributes = []
 
-        # 1. Общие текстовые блоки
         for tag in soup.find_all(["li", "div", "p", "span"]):
             text = tag.get_text(strip=True)
             if ":" in text:
@@ -162,7 +163,6 @@ def generate():
                     "variation": False
                 })
 
-        # 2. Поиск таблиц (например, DANE TECHNICZNE)
         for table in soup.find_all("table"):
             for row in table.find_all("tr"):
                 cells = row.find_all(["td", "th"])
